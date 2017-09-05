@@ -1,0 +1,159 @@
+= OMTD Processing Web Service API Specification
+
+
+== Introduction
+
+
+The OMTD Processing Web Service API specification has been produced to allow the processing of data, within a workflow execution, to occur outside of the OpenMinTeD infrastructure.  The target audience of this API are Text and Data Mining service providers that wish to make their processing components available within workflows in the OpenMinTeD platform, but want to retain the ability to deploy and manage the processing components themselves.
+
+== Motivation
+
+
+During a typical workflow execution, OpenMinTeD processing components are retrieved from a public central repository and automatically deployed within the OpenMinTeD infrastructure.  The requirement to make processing components publicly-accessible, or in a format compatible with OpenMinTeD (e.g. Docker image, UIMA analysis engine), is not always desirable or even possible.  For example, there may be component developers that are unwilling to distribute their code due to commercial reasons, or they face constraints (e.g. financial, time) which prevent them from adapting their existing solutions to run on the OpenMinTeD platform.
+
+The Processing Web Service API was therefore conceived as an alternative mechanism by which Text and Data Mining service providers can quickly and easily integrate their solutions into the OpenMinTeD platform without facing the aforementioned obstructions.  This means the providers are free to develop and deploy their processing components using whatever technologies they feel are more suitable, and then exposing these components to the OpenMinTeD platform through a thin Processing Web Service API layer.
+
+== OpenMinTeD Platform Integration
+
+
+To illustrate how the API specification is used within an OpenMinTeD execution, Figure 1 shows the flow of data within a workflow execution consisting of 4 local components (i.e. those automatically deployed and managed by the OpenMinTeD platform) and 1 remote component (i.e. those externally deployed and managed by a third-party but implementing the Processing Web Service API).
+
+[#img-platform-integration]
+.Data flow in a workflow execution involving remote processing
+image::platform-integration.png[align="center"]
+
+
+The Remote Component Proxy is simply a reusable and lightweight OpenMinTeD component, which requires only 1 parameter:  the URL to the remote component’s Processing Web Service API.  Without the definition of the Processing Web Service API, the providers of remote processing services would not only have to define their own API, but also develop and deploy their own proxy components onto the OpenMinTeD platform. 
+
+== REST API Definition
+
+=== Process CAS
+
+|===
+|Title|Process CAS
+|URL|/process
+|Method|POST
+|Consumes|multipart/form-data
+|Produces|application/json;charset=UTF-8
+|URL params|none
+|Data params| *cas* - UIMA CAS XMI file to use as input for processing
+*typesystem* (optional) - UIMA Type System XML file
+|Success response| Code: 200
+
+Example: +
+{ +
+ "*url*": "http://localhost:8080/process/0766de48-2090-4d36-be4e-154d04c706a4", +
+ "*status*": "running" +
+}
+|===
+=== Get Process Status
+
+|===
+|Title|Get process status
+|URL|/process/{*processId*}
+|Method|GET
+|Consumes|none
+|Produces|application/json;charset=UTF-8
+|URL params| *processId* - ID of a process
+|Data params|none
+|Success response| * Code: 200
+
+Example: +
+{ +
+"*url*": "http://localhost:8080/process/0766de48-2090-4d36-be4e-154d04c706a4", +
+"*casUrl*": "http://localhost:8080/cas/0766de48-2090-4d36-be4e-154d04c706a4", +
+"*typeSystemUrl*": "http://localhost:8080/typeSystem/0766de48-2090-4d36-be4e-154d04c706a4", +
+"*deletionUrl*": "http://localhost:8080/process/0766de48-2090-4d36-be4e-154d04c706a4", +
+"*status*":"finished" +
+}
+|===
+=== Get Processed CAS
+
+|===
+|Title|Get resulting UIMA CAS XMI file from a successfully completed process
+|URL|/cas/{*processId*}
+|Method|GET
+|Consumes|none
+|Produces|application/vnd.xmi+xml;charset=UTF-8
+|URL params| *processId* - ID of a process
+|Data params|none
+|Success response| Code: 200
+
+UIMA CAS XMI returned
+|===
+=== Get Type System
+
+|===
+|Title|Get resulting UIMA Type System XML file from a successfully completed process
+|URL|/typeSystem/{*processId*}
+|Method|GET
+|Consumes|none
+|Produces|application/xml;charset=UTF-8
+|URL params| *processId* - ID of a process
+|Data params|none
+|Success response| Code: 200
+
+UIMA Type System XML returned
+|===
+=== Delete process
+
+|===
+|Title|Delete a process and its associated results
+|URL|/process/{*processId*}
+|Method|DELETE
+|Consumes|none
+|Produces|application/json;charset=UTF-8
+|URL params| *processId* - ID of a process
+|Data params|none
+|Success response| Code: 200
+|===
+
+== REST API Sequence Flow
+
+[#img-sequence-flow]
+.Sequence of calls involved when processing a single data document
+image::sequence-flow.png[align="center"]
+
+== Processing Web Service API Framework
+
+As a proof-of-concept, a Java-based framework has been developed which demonstrates how middleware can be successfully produced to reduce the burden of deploying existing processing components to conform to the Processing Web Service API.  It is available on GitHub at https://github.com/openminted/omtd-remote-execution[https://github.com/openminted/omtd-remote-execution].
+
+The framework allows a developer to define a pipeline of UIMA components, by implementing a single-method Java interface:
+
+[source,java]
+----
+package eu.openminted.remoteexecution.server.processor.uima;
+
+...
+
+public interface UimaPipeline {
+	List<AnalysisEngineDescription> analysisEngines() throws Exception;
+}
+----
+
+Once a class, implementing the UimaPipeline interface, has been created then the framework can produce a https://projects.spring.io/spring-boot/[Spring Boot] powered Java application.  This artifact can subsequently be deployed, like any regular Spring Boot web service, and expose the processing pipeline via the Processing Web Service API.
+
+The framework can be easily extended to support other types of components (e.g. GATE) or a developer can simply incorporate their processing code into the framework directly by implementing another single-method Java interface:
+
+[source,java]
+----
+package eu.openminted.remoteexecution.server.processor;
+
+...
+
+public interface Processor extends Runnable {
+	CompletableFuture<ProcessorOutput> process(ProcessorInput input);
+}
+----
+
+
+For an example of a Processor implementation, please refer to the https://github.com/openminted/omtd-remote-execution/blob/master/omtd-remote-execution-server/src/main/java/eu/openminted/remoteexecution/server/processor/uima/UimaPipelineProcessor.java[processor responsible for running UIMA pipelines].
+
+== Working example of a web service implementing the Processing Web Service API
+
+
+For the purposes of OpenMinTeD, http://nactem.ac.uk[The National Centre of Text Mining] (NaCTeM) have developed and deployed a web service built using the Processing Web Service Framework.  The pipeline, exposed via the web service, aids curation of the ChEBI database using a number of information extraction tools to recognise species. metabolites, biological activity, proteins, and relations between these entities.
+
+The NaCTeM Chebi Processing Web Service API can be found at http://nactem.ac.uk/api/openminted/chebi/[http://nactem.ac.uk/api/openminted/chebi/].
+
+An example workflow, which includes the Remote Component Proxy component to call the NaCTeM Chebi web service, is hosted on GitHub at https://github.com/galanisd/omtd-simple-workflows/tree/master/omtd-simple-workflows-uniman[https://github.com/galanisd/omtd-simple-workflows/tree/master/omtd-simple-workflows-uniman].
